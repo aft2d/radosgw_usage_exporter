@@ -328,19 +328,19 @@ class RADOSGWCollector(object):
             for bucket_name in list(self.usage_dict[bucket_owner].keys()):
                 for category in list(self.usage_dict[bucket_owner][bucket_name].keys()):
                     data_dict = self.usage_dict[bucket_owner][bucket_name][category]
-                    
+
                     # Build metrics labels to match the label schema
                     u_metrics = [bucket_name, bucket_owner, category, self.store]
-                    
+
                     # Add empty strings for tag labels (usage API doesn't provide tags)
                     if self.tag_list:
                         u_metrics = u_metrics + [""] * len(self.tag_list.split(","))
-                    
+
                     # Add namespace if extraction is enabled
                     if self.enable_namespace_extraction:
                         bucket_namespace = get_bucket_namespace(bucket_name, bucket_owner, self.obc_name_prefix)
                         u_metrics.append(bucket_namespace)
-                    
+
                     self._prometheus_metrics["ops"].add_metric(
                         u_metrics,
                         data_dict["ops"],
@@ -699,6 +699,27 @@ def get_bucket_namespace(bucket_name, bucket_owner, obc_name_prefix):
     idx = owner_no_prefix.find(bucket_suffix)
     if idx != -1:
         return owner_no_prefix[:idx]
+
+    # Case 4: Fuzzy matching - look for bucket name components
+    # Split bucket name by hyphens and try to find where these parts appear in owner
+    bucket_parts = cleaned_bucket_name.split("-")
+
+    # Try to find a sequence of bucket parts within the owner string
+    # This helps when bucket name is "cdp-staging-mongodb-backup"
+    # and owner is "obc-staging-cdp-mongodb-backup-<uuid>"
+    for i in range(len(bucket_parts)):
+        for j in range(i + 1, len(bucket_parts) + 1):
+            # Try progressively longer substrings from the bucket name
+            bucket_substring = "-".join(bucket_parts[i:j])
+            search_pattern = f"-{bucket_substring}"
+
+            idx = owner_no_prefix.find(search_pattern)
+            if idx != -1:
+                # Found a match - return everything before this match
+                namespace = owner_no_prefix[:idx]
+                # Make sure we have a valid namespace (at least one hyphen, meaning multiple parts)
+                if namespace and "-" in namespace:
+                    return namespace
 
     return ""
 
